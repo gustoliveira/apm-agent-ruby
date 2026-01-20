@@ -72,6 +72,7 @@ module ElasticAPM
     option :http_compression,                  type: :bool,   default: true
     option :ignore_url_patterns,               type: :list,   default: [],      converter: RegexpList.new
     option :instrument,                        type: :bool,   default: true
+    option :instrument_rack_middlewares,       type: :bool,   default: true
     option :instrumented_rake_tasks,           type: :list,   default: []
     option :log_ecs_reformatting,              type: :string, default: 'off'
     option :log_level,                         type: :int,    default: Logger::INFO, converter: LogLevelMap.new

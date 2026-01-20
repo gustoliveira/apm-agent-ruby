@@ -36,7 +36,7 @@ module ElasticAPM
 
         register_queue_time(transaction, env) if transaction
 
-        resp = @app.call env
+        resp = call_with_rack_stack_span(env, transaction)
       rescue InternalError
         raise # Don't report ElasticAPM errors
       rescue ::Exception => e
@@ -115,6 +115,35 @@ module ElasticAPM
       span.timestamp = transaction.timestamp
 
       ElasticAPM.end_span(span)
+    end
+
+    def call_with_rack_stack_span(env, transaction)
+      return @app.call(env) unless config.instrument_rack_middlewares
+
+      # Record when the Rack Stack starts
+      rack_stack_timestamp = Util.micros
+      rack_stack_clock_start = Util.monotonic_micros
+
+      # Initialize middleware tracking in env
+      env['elastic_apm.prev_middleware_clock'] = nil
+      env['elastic_apm.prev_middleware_name'] = nil
+      env['elastic_apm.prev_middleware_timestamp'] = nil
+      env['elastic_apm.rack_stack_timestamp'] = rack_stack_timestamp
+      env['elastic_apm.rack_stack_clock_start'] = rack_stack_clock_start
+      env['elastic_apm.last_middleware_end'] = nil
+
+      # Start the Rack Stack umbrella span FIRST (so middleware spans become children)
+      # Store it in env so the last middleware can close it
+      env['elastic_apm.rack_stack_span'] = ElasticAPM.start_span(
+        'Rack Stack',
+        'app',
+        subtype: 'rack',
+        action: 'stack'
+      )
+
+      # Call the app - middleware spans are created by RackMiddlewareSpy
+      # The LAST middleware will close the Rack Stack span before the controller runs
+      @app.call(env)
     end
   end
 end

@@ -17,6 +17,8 @@
 
 # frozen_string_literal: true
 
+require 'elastic_apm/spies/rack_middleware'
+
 module ElasticAPM
   # @api private
   class Railtie < ::Rails::Railtie
@@ -37,6 +39,44 @@ module ElasticAPM
 
       if Rails.start(config)
         app.middleware.insert 0, Middleware
+      end
+    end
+
+    initializer 'elastic_apm.instrument_middlewares', after: :initialize_logger do |app|
+      # We use a separate initializer to ensure it runs, but we still wait until after_initialize
+      # for the actual work because the middleware stack might change during boot.
+    end
+
+    # Instrument middlewares after the app is fully initialized
+    config.after_initialize do |app|
+      next unless ElasticAPM.running?
+      next unless ElasticAPM.agent.config.instrument_rack_middlewares
+
+      Railtie.instrument_middlewares(app)
+    end
+
+    class << self
+      def instrument_middlewares(app)
+        last_middleware = nil
+        middlewares = app.middleware.to_a
+        
+        # Find the last instrumentable middleware
+        middlewares.reverse_each do |m|
+          klass = m.respond_to?(:klass) ? m.klass : m
+          if klass.is_a?(Class) && !Spies::RackMiddlewareSpy.should_skip?(klass)
+            last_middleware = klass
+            break
+          end
+        end
+        
+        Spies::RackMiddlewareSpy.last_middleware_class = last_middleware
+
+        app.middleware.each do |middleware|
+          klass = middleware.respond_to?(:klass) ? middleware.klass : middleware
+          next unless klass.is_a?(Class)
+
+          Spies::RackMiddlewareSpy.instrument_middleware(klass)
+        end
       end
     end
   end

@@ -227,6 +227,18 @@ module ElasticAPM
         span.original_backtrace = backtrace
       end
 
+      # If the current span is 'Rack Stack' and we are starting a DIFFERENT span,
+      # it means we've moved past the middleware overhead into the application (e.g. controller).
+      # We should close the Rack Stack span now.
+      if (curr = current_span) && curr.name == 'Rack Stack' && name != 'Rack Stack' && type != 'app'
+        # We don't close it if it's another middleware span (type 'app')
+        # But if it's a controller span or DB span, we close Rack Stack.
+        # Actually, if type is NOT 'app' or if it's 'app' but NOT 'rack' subtype
+        if type != 'app' || subtype != 'rack'
+          end_span(curr)
+        end
+      end
+
       current_spans.push span
 
       span.start
